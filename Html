@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CaseTrace Local</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 0; background:#0b0f14; color:#e9eef5; }
+    header { padding: 16px; border-bottom: 1px solid #1c2531; position: sticky; top: 0; background:#0b0f14; }
+    h1 { margin: 0; font-size: 18px; }
+    main { padding: 16px; max-width: 900px; margin: 0 auto; }
+    .card { background:#111826; border:1px solid #1c2531; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+    label { display:block; font-size: 12px; opacity:.85; margin: 10px 0 6px; }
+    input, textarea { width:100%; padding: 10px; border-radius: 10px; border:1px solid #273244; background:#0b0f14; color:#e9eef5; }
+    textarea { min-height: 90px; resize: vertical; }
+    button { padding: 10px 12px; border-radius: 10px; border:1px solid #273244; background:#1b2a40; color:#e9eef5; font-weight:600; }
+    button:hover { filter: brightness(1.08); cursor:pointer; }
+    .row { display:flex; gap:10px; flex-wrap: wrap; }
+    .row > * { flex: 1 1 220px; }
+    .cases { display:grid; gap:10px; }
+    .case { padding: 12px; border-radius: 12px; border:1px solid #273244; background:#0b0f14; }
+    .meta { font-size: 12px; opacity:.8; display:flex; gap:10px; flex-wrap: wrap; margin-top: 6px; }
+    .pill { padding: 2px 8px; border:1px solid #273244; border-radius: 999px; }
+    .danger { background:#3b1111; border-color:#5a1b1b; }
+    .muted { opacity:.75; font-size: 12px; }
+    .topline { display:flex; justify-content: space-between; align-items:center; gap:10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="topline">
+      <h1>CaseTrace Local (offline prototype)</h1>
+      <button id="wipeBtn" class="danger" title="Deletes local data">Wipe Local Data</button>
+    </div>
+    <div class="muted">This is a simple starter that saves cases in your browser (localStorage). No servers yet.</div>
+  </header>
+
+  <main>
+    <div class="card">
+      <h2 style="margin:0 0 8px;font-size:16px;">Add a case</h2>
+
+      <div class="row">
+        <div>
+          <label>Case Title</label>
+          <input id="title" placeholder="e.g., Broken window incident" />
+        </div>
+        <div>
+          <label>Case ID (optional)</label>
+          <input id="caseId" placeholder="e.g., CT-001" />
+        </div>
+        <div>
+          <label>Status</label>
+          <input id="status" placeholder="e.g., Open / Closed / Pending" />
+        </div>
+      </div>
+
+      <label>Notes</label>
+      <textarea id="notes" placeholder="Write the details here..."></textarea>
+
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+        <button id="addBtn">Save Case</button>
+        <span class="muted" id="count"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="topline">
+        <h2 style="margin:0;font-size:16px;">Cases</h2>
+        <input id="search" placeholder="Search..." style="max-width: 260px;" />
+      </div>
+      <div class="muted" style="margin-top:6px;">Tap a case to copy its JSON to clipboard (easy export).</div>
+    </div>
+
+    <div class="cases" id="cases"></div>
+  </main>
+
+<script>
+  const KEY = "casetrace_local_cases_v1";
+
+  const els = {
+    title: document.getElementById("title"),
+    caseId: document.getElementById("caseId"),
+    status: document.getElementById("status"),
+    notes: document.getElementById("notes"),
+    addBtn: document.getElementById("addBtn"),
+    wipeBtn: document.getElementById("wipeBtn"),
+    list: document.getElementById("cases"),
+    search: document.getElementById("search"),
+    count: document.getElementById("count"),
+  };
+
+  function load() {
+    try { return JSON.parse(localStorage.getItem(KEY) || "[]"); }
+    catch { return []; }
+  }
+
+  function save(items) {
+    localStorage.setItem(KEY, JSON.stringify(items));
+  }
+
+  function uid() {
+    return Math.random().toString(16).slice(2) + "-" + Date.now().toString(16);
+  }
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("Copied to clipboard.");
+    } catch {
+      alert("Could not copy (browser blocked it).");
+    }
+  }
+
+  function render() {
+    const q = (els.search.value || "").toLowerCase().trim();
+    const items = load().sort((a,b)=> b.createdAt - a.createdAt);
+    const filtered = q
+      ? items.filter(x =>
+          (x.title||"").toLowerCase().includes(q) ||
+          (x.caseId||"").toLowerCase().includes(q) ||
+          (x.status||"").toLowerCase().includes(q) ||
+          (x.notes||"").toLowerCase().includes(q)
+        )
+      : items;
+
+    els.count.textContent = `${filtered.length} shown / ${items.length} total`;
+
+    els.list.innerHTML = "";
+    if (!filtered.length) {
+      const empty = document.createElement("div");
+      empty.className = "card muted";
+      empty.textContent = "No cases yet. Add one above.";
+      els.list.appendChild(empty);
+      return;
+    }
+
+    filtered.forEach(item => {
+      const div = document.createElement("div");
+      div.className = "case";
+      div.innerHTML = `
+        <div class="topline">
+          <div style="font-weight:700;">${escapeHtml(item.title || "(No title)")}</div>
+          <button data-del="${item.id}" class="danger" style="padding:6px 10px;">Delete</button>
+        </div>
+        <div class="meta">
+          ${item.caseId ? `<span class="pill">ID: ${escapeHtml(item.caseId)}</span>` : ""}
+          ${item.status ? `<span class="pill">Status: ${escapeHtml(item.status)}</span>` : ""}
+          <span class="pill">Created: ${new Date(item.createdAt).toLocaleString()}</span>
+        </div>
+        ${item.notes ? `<div style="margin-top:8px; white-space:pre-wrap;">${escapeHtml(item.notes)}</div>` : ""}
+      `;
+
+      div.addEventListener("click", (e) => {
+        const delId = e.target?.getAttribute?.("data-del");
+        if (delId) return; // handled below
+        copyText(JSON.stringify(item, null, 2));
+      });
+
+      div.querySelector(`[data-del="${item.id}"]`).addEventListener("click", (e) => {
+        e.stopPropagation();
+        const itemsNow = load().filter(x => x.id !== item.id);
+        save(itemsNow);
+        render();
+      });
+
+      els.list.appendChild(div);
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replaceAll("&","&amp;")
+      .replaceAll("<","&lt;")
+      .replaceAll(">","&gt;")
+      .replaceAll('"',"&quot;")
+      .replaceAll("'","&#039;");
+  }
+
+  els.addBtn.addEventListener("click", () => {
+    const title = els.title.value.trim();
+    const caseId = els.caseId.value.trim();
+    const status = els.status.value.trim();
+    const notes = els.notes.value.trim();
+
+    if (!title && !notes) {
+      alert("Put at least a title or some notes.");
+      return;
+    }
+
+    const items = load();
+    items.push({
+      id: uid(),
+      title, caseId, status, notes,
+      createdAt: Date.now()
+    });
+    save(items);
+
+    els.title.value = "";
+    els.caseId.value = "";
+    els.status.value = "";
+    els.notes.value = "";
+    render();
+  });
+
+  els.wipeBtn.addEventListener("click", () => {
+    const ok = confirm("Wipe all local cases from this browser?");
+    if (!ok) return;
+    localStorage.removeItem(KEY);
+    render();
+  });
+
+  els.search.addEventListener("input", render);
+
+  render();
+</script>
+</body>
+</html>
